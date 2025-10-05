@@ -38,11 +38,11 @@ d = 0.04
 
 # SIMULATION SETUP
 run_simulation::Bool = true
-duration = 2e-3
-timestep = 1e-9
+duration = 5e-3
+timestep = 5e-9
 simresolution = 100
-bfield_range = range(0.01,0.02,10)
-mdot_range = range(0.4e-6,1e-6,10)
+bfield_range = range(0.015,0.019,4)
+mdot_range = range(0.2e-6,1e-6,10)
 
 # === SCALING MATHS ===
 # DANNENMEYER MODEL
@@ -150,7 +150,7 @@ print_results("Averaged", avg_d, avg_h, avg_T, avg_mdot, avg_eff, avg_isp, avg_r
 
 
 function bfield_model(B_max, g, d, x_p, x)
-B = similar(x)  # allocate result with same shape as x
+    B = similar(x)  # allocate result with same shape as x
 
     for (i, xi) in pairs(x)
         if xi >= 0 && xi < x_p
@@ -162,7 +162,7 @@ B = similar(x)  # allocate result with same shape as x
     return B
 end
 
-function GetMagnetiicField(Bmax = bmax, growth = g, decay = d, peak = x_p)
+function GetMagneticField(Bmax = bmax, growth = g, decay = d, peak = x_p)
     x_bfield = 0:0.0001:(4*L_channel)
     magnetic_field = het.MagneticField(z = [], B = [])
     
@@ -171,17 +171,6 @@ function GetMagnetiicField(Bmax = bmax, growth = g, decay = d, peak = x_p)
     else
         bfield = bfield_model(Bmax, growth, decay, peak, x_bfield)
         magnetic_field = het.MagneticField(z = x_bfield, B = bfield)
-    
-        # # Plot magnetic field
-        # fig = mk.Figure(size = (800, 600))
-        # ax = mk.Axis(fig[1, 1], xlabel = "Axial Position (m)",
-        #                        ylabel = "Magnetic Field (T)",
-        #                        title = "Magnetic Field Profile")
-        # lineplot = mk.lines!(ax, x_bfield, b_field, color = :blue, linewidth = 2, label = "B-field")
-        # vlineplot = mk.vlines!(ax, L_channel, color = :red, label = "Channel Start/End")
-        # mk.Legend(fig[1, 2], [lineplot, vlineplot], ["B-field", "Channel Start/End"], orientation = :vertical)
-    
-        # mk.display(fig)
     end
     return magnetic_field
 end
@@ -196,35 +185,7 @@ function HETPerformance(solution)
     return thrust, dischargeCurrent, anodeEff, isp, power
 end
 
-if run_simulation == true
-    println("Starting simulation...")
-
-    # SINGLE POINT SIMULATION
-    # === SIMULATION ===
-    geom = het.Geometry1D(channel_length = L_channel,
-                            inner_radius = avg_r_inner,
-                            outer_radius = avg_r_outer)
-    thruster = het.Thruster(name = "H-CHeT-300",
-                            geometry = geom,
-                            magnetic_field = GetMagnetiicField(bmax, g, d, x_p))
-    config = het.Config(thruster = thruster,
-                            domain = (0.0, 4 * L_channel),
-                            discharge_voltage = V_anode,
-                            propellants = [het.Propellant(het.Krypton, flow_rate_kg_s = avg_mdot, max_charge = 3)])
-    simparams = het.SimParams(grid = het.EvenGrid(simresolution),
-                            dt = timestep,
-                            duration = duration,
-                            num_save = Int(duration * 1e6))
-    solution = het.run_simulation(config, simparams)
-
-    sim_thrust, sim_dischargeCurrent, sim_anodeEff, sim_isp, sim_power = HETPerformance(solution)
-
-    println("Final thrust: $(sim_thrust[end] * 1000) mN")
-    println("Final discharge current: $(sim_dischargeCurrent[end]) A")
-    println("Final anode efficiency: $(sim_anodeEff[end])")
-    println("Final specific impulse: $(sim_isp[end]) s")
-    println("Final input power: $(sim_power[end] * 1e-3) kW")
-
+function RunVaryMdotAndBfield(geom, simparams)
     # VARYING MASS FLOW RATE AND B FIELD SIMULATION
     sim_thrust_range = zeros(length(mdot_range), length(bfield_range))
     sim_dischargeCurrent_range = zeros(length(mdot_range), length(bfield_range))
@@ -232,11 +193,14 @@ if run_simulation == true
     sim_isp_range = zeros(length(mdot_range), length(bfield_range))
     sim_power_range = zeros(length(mdot_range), length(bfield_range))
 
+    elements = length(mdot_range) * length(bfield_range)
+    avg_time_per_sim = 20  # seconds, rough estimate
+    total_estimated_time = elements * avg_time_per_sim / 60  # in minutes
     for mdot in mdot_range
         for bfield in bfield_range
             thruster = het.Thruster(name = "H-CHeT-300",
                                     geometry = geom,
-                                    magnetic_field = GetMagnetiicField(bfield, g, d, x_p))
+                                    magnetic_field = GetMagneticField(bfield, g, d, x_p))
             config = het.Config(thruster = thruster,
                                     domain = (0.0, 4 * L_channel),
                                     discharge_voltage = V_anode,
@@ -253,16 +217,16 @@ if run_simulation == true
                 sim_power[end] = 0
                 continue
             end
-            print_performance(sim_thrust[end], mdot, sim_anodeEff[end], sim_isp[end])
+            #print_performance(sim_thrust[end], mdot, sim_anodeEff[end], sim_isp[end])
             
             sim_thrust_range[findfirst(==(mdot), mdot_range), findfirst(==(bfield), bfield_range)] = sim_thrust[end]
             sim_dischargeCurrent_range[findfirst(==(mdot), mdot_range), findfirst(==(bfield), bfield_range)] = sim_dischargeCurrent[end]
             sim_anodeEff_range[findfirst(==(mdot), mdot_range), findfirst(==(bfield), bfield_range)] = sim_anodeEff[end]
             sim_isp_range[findfirst(==(mdot), mdot_range), findfirst(==(bfield), bfield_range)] = sim_isp[end]
             sim_power_range[findfirst(==(mdot), mdot_range), findfirst(==(bfield), bfield_range)] = sim_power[end]
-            println("Completed B-field = $(bfield * 1e3) mT")
+            #println("Completed B-field = $(bfield * 1e3) mT")
         end
-        println("Completed mdot = $(mdot * 1e6) mg/s")
+        #println("Completed mdot = $(mdot * 1e6) mg/s")
     end
 
     # Plotting contours for all five parameters
@@ -300,5 +264,146 @@ if run_simulation == true
     mk.Colorbar(fig[3, 2], co5, label = "Input Power (kW)")
 
     mk.display(fig)
+    return
+end
+
+function RunBasicParams(config, simparams)
+    solution = het.run_simulation(config, simparams)
+
+    sim_thrust, sim_dischargeCurrent, sim_anodeEff, sim_isp, sim_power = HETPerformance(solution)
+
+    println("Final thrust: $(sim_thrust[end] * 1000) mN")
+    println("Final discharge current: $(sim_dischargeCurrent[end]) A")
+    println("Final anode efficiency: $(sim_anodeEff[end])")
+    println("Final specific impulse: $(sim_isp[end]) s")
+    println("Final input power: $(sim_power[end] * 1e-3) kW")
+end
+
+function RunVaryMdot(geom, simparams)
+    # VARYING MASS FLOW RATE SIMULATION
+    sim_thrust_range = zeros(length(mdot_range))
+    sim_dischargeCurrent_range = zeros(length(mdot_range))
+    sim_anodeEff_range = zeros(length(mdot_range))
+    sim_isp_range = zeros(length(mdot_range))
+    sim_power_range = zeros(length(mdot_range))
+
+    elements = length(mdot_range)
+    avg_time_per_sim = 20  # seconds, rough estimate
+    total_estimated_time = elements * avg_time_per_sim / 60  # in minutes
+    for mdot in mdot_range
+        thruster = het.Thruster(name = "H-CHeT-300",
+                                geometry = geom,
+                                magnetic_field = GetMagneticField(bmax, g, d, x_p))
+        config = het.Config(thruster = thruster,
+                                domain = (0.0, 4 * L_channel),
+                                discharge_voltage = V_anode,
+                                propellants = [het.Propellant(het.Krypton, flow_rate_kg_s = mdot, max_charge = 3)])
+        solution = het.run_simulation(config, simparams)
+
+        sim_thrust, sim_dischargeCurrent, sim_anodeEff, sim_isp, sim_power = HETPerformance(solution)
+
+        if (sim_thrust[end] < 0) || (sim_dischargeCurrent[end] < 0) || (sim_anodeEff[end] < 0) || (sim_isp[end] < 0) || (sim_power[end] < 0)
+            sim_thrust[end] = 0
+            sim_dischargeCurrent[end] = 0
+            sim_anodeEff[end] = 0
+            sim_isp[end] = 0
+            sim_power[end] = 0
+            continue
+        end
+        #print_performance(sim_thrust[end], mdot, sim_anodeEff[end], sim_isp[end])
+        
+        sim_thrust_range[findfirst(==(mdot), mdot_range)] = sim_thrust[end]
+        sim_dischargeCurrent_range[findfirst(==(mdot), mdot_range)] = sim_dischargeCurrent[end]
+        sim_anodeEff_range[findfirst(==(mdot), mdot_range)] = sim_anodeEff[end]
+        sim_isp_range[findfirst(==(mdot), mdot_range)] = sim_isp[end]
+        sim_power_range[findfirst(==(mdot), mdot_range)] = sim_power[end]
+    end
+    # Plotting 1D plots for all five parameters
+    fig = mk.Figure(size = (1200, 800))
+    ax1 = mk.Axis(fig[1, 1], xlabel = "Mass Flow Rate (mg/s)",
+                           ylabel = "Thrust (mN)",
+                           title = "Thrust vs Mass Flow Rate")
+    mk.lines!(ax1, mdot_range .* 1e6, sim_thrust_range .* 1000, linewidth = 2, color = :blue)
+    ax2 = mk.Axis(fig[2, 1], xlabel = "Mass Flow Rate (mg/s)",
+                           ylabel = "Discharge Current (A)",
+                           title = "Discharge Current vs Mass Flow Rate")
+    mk.lines!(ax2, mdot_range .* 1e6, sim_dischargeCurrent_range, linewidth = 2, color = :blue)
+    ax3 = mk.Axis(fig[3, 1], xlabel = "Mass Flow Rate (mg/s)",
+                           ylabel = "Anode Efficiency (%)",
+                           title = "Anode Efficiency vs Mass Flow Rate")
+    mk.lines!(ax3, mdot_range .* 1e6, sim_anodeEff_range .* 100, linewidth = 2, color = :blue)
+    ax4 = mk.Axis(fig[1, 2], xlabel = "Mass Flow Rate (mg/s)",
+                           ylabel = "Specific Impulse (s)",
+                           title = "Specific Impulse vs Mass Flow Rate")
+    mk.lines!(ax4, mdot_range .* 1e6, sim_isp_range, linewidth = 2, color = :blue)  
+    ax5 = mk.Axis(fig[2, 2], xlabel = "Mass Flow Rate (mg/s)",
+                           ylabel = "Input Power (kW)",
+                           title = "Input Power vs Mass Flow Rate")
+    mk.lines!(ax5, mdot_range .* 1e6, sim_power_range .* 1e-3, linewidth = 2, color = :blue)
+    mk.display(fig)
+    return
+end
+
+function PlotMagneticField(bfield_range, g, d, x_p)
+    thruster_bfield_curves = []
+    x = 0:0.0001:(4*L_channel)
+    for bfield in bfield_range
+        push!(thruster_bfield_curves, bfield_model(bfield, g, d, x_p, x))
+    end
+    return thruster_bfield_curves
+
+    # Plot magnetic field
+    fig = mk.Figure(size = (800, 600))
+    ax = mk.Axis(fig[1, 1], xlabel = "Axial Position (m)",
+                           ylabel = "Magnetic Field (T)",
+                           title = "Magnetic Field Profile")
+    for thruster_bfield in thruster_bfield_curves
+        lineplot = mk.lines!(ax, x, thruster_bfield, linewidth = 2, label = "B-field $(thruster_bfield.B[findmax(thruster_bfield.B)[2]]*1e3) mT")
+    end
+    vlineplot = mk.vlines!(ax, L_channel, color = :red, label = "Channel Start/End")    
+    mk.Legend(fig[1, 2], [lineplot, vlineplot], ["B-field", "Channel Start/End"], orientation = :vertical)
+    mk.display(fig)
+    return
+end
+
+if run_simulation == true
+    # thruster_bfield_curves = GetMagneticField(bfield_range, g, d, x_p)
+    
+    # # Plot magnetic field
+    # fig = mk.Figure(size = (800, 600))
+    # ax = mk.Axis(fig[1, 1], xlabel = "Axial Position (m)",
+    #                        ylabel = "Magnetic Field (T)",
+    #                        title = "Magnetic Field Profile")
+
+    # for thruster_bfield in thruster_bfield_curves
+    #     lineplot = mk.lines!(ax, thruster_bfield.z, thruster_bfield.B, linewidth = 2, label = "B-field $(thruster_bfield.B[findmax(thruster_bfield.B)[2]]*1e3) mT")
+    # end
+    # vlineplot = mk.vlines!(ax, L_channel, color = :red, label = "Channel Start/End")
+    # mk.Legend(fig[1, 2], [lineplot, vlineplot], ["B-field", "Channel Start/End"], orientation = :vertical)
+
+    # mk.display(fig)
+    println("Starting simulation...")
+
+    # SINGLE POINT SIMULATION
+    # === SIMULATION ===
+    geom = het.Geometry1D(channel_length = L_channel,
+                            inner_radius = avg_r_inner,
+                            outer_radius = avg_r_outer)
+    thruster = het.Thruster(name = "H-CHeT-300",
+                            geometry = geom,
+                            magnetic_field = GetMagneticField(bmax, g, d, x_p))
+    config = het.Config(thruster = thruster,
+                            domain = (0.0, 3 * L_channel),
+                            discharge_voltage = V_anode,
+                            propellants = [het.Propellant(het.Krypton, flow_rate_kg_s = avg_mdot, max_charge = 3)])
+    simparams = het.SimParams(grid = het.UnevenGrid(simresolution),
+                            dt = timestep,
+                            duration = duration,
+                            num_save = Int(duration * 1e6))
+    PlotMagneticField(bmax, g, d, x_p)
+    #RunVaryMdot(geom, simparams)
+    #RunBasicParams(config, simparams)
+    #RunVaryMdotAndBfield(geom, simparams)
+
     return
 end
