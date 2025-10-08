@@ -30,19 +30,23 @@ P_in = 100
 V_anode = 300
 L_channel = 0.03
 bfield_file::String = ""
-bmax = 0.010
+bmax = 0.015
 g = 0.008
 x_p = 0.03
 d = 0.015
 
+# CUSTOM THRUSTER
+d_custom = 0.022
+h_custom = 0.005
+mdot_custom = 0.9e-6
 
 # SIMULATION SETUP
 run_simulation::Bool = true
 duration = 2e-3
 timestep = 5e-9
-simresolution = 100
-bfield_range = range(0.010,0.015,10)
-mdot_range = range(0.2e-6,1e-6,10)
+simresolution = 50
+bfield_range = range(0.010,0.02,10)
+mdot_range = range(0.7e-6,2e-6,10)
 
 # === SCALING MATHS ===
 # DANNENMEYER MODEL
@@ -115,6 +119,8 @@ Lee_r_inner  = calculate_inner_diameter(Lee_d, Lee_h) / 2
 Lee_r_outer  = calculate_outer_diameter(Lee_d, Lee_h) / 2
 Hyb_r_inner  = calculate_inner_diameter(Hyb_d, Hyb_h) / 2
 Hyb_r_outer  = calculate_outer_diameter(Hyb_d, Hyb_h) / 2
+custom_r_inner = calculate_inner_diameter(d_custom, h_custom) / 2
+custom_r_outer = calculate_outer_diameter(d_custom, h_custom) / 2
 avg_r_inner = (Dann_r_inner + Lee_r_inner + Hyb_r_inner) / 3
 avg_r_outer = (Dann_r_outer + Lee_r_outer + Hyb_r_outer) / 3
 
@@ -527,29 +533,47 @@ if run_simulation == true
 
     # SINGLE POINT SIMULATION
     # === SIMULATION ===
-    geom = het.Geometry1D(channel_length = L_channel,
+    geom_avg = het.Geometry1D(channel_length = L_channel,
                             inner_radius = avg_r_inner,
                             outer_radius = avg_r_outer)
-    thruster = het.Thruster(name = "H-CHeT-300",
-                            geometry = geom,
+    thruster_avg = het.Thruster(name = "avg_thruster",
+                            geometry = geom_avg,
                             magnetic_field = GetMagneticField(bmax, g, d, x_p))
-    config = het.Config(thruster = thruster,
+    config_avg = het.Config(thruster = thruster_avg,
                             domain = (0.0, 3 * L_channel),
                             discharge_voltage = V_anode,
                             propellants = [het.Propellant(het.Krypton, flow_rate_kg_s = avg_mdot, max_charge = 3)])
+    geom_custom = het.Geometry1D(channel_length = L_channel,
+                            inner_radius = custom_r_inner,
+                            outer_radius = custom_r_outer)
+    thruster_custom = het.Thruster(name = "custom_thruster",
+                            geometry = geom_custom,
+                            magnetic_field = GetMagneticField(bmax, g, d, x_p))
+    config_custom = het.Config(thruster = thruster_custom,
+                            domain = (0.0, 3 * L_channel),
+                            discharge_voltage = V_anode,
+                            propellants = [het.Propellant(het.Krypton, flow_rate_kg_s = mdot_custom, max_charge = 3)])
     simparams = het.SimParams(grid = het.UnevenGrid(simresolution),
                             dt = timestep,
                             duration = duration,
                             num_save = Int(duration * 1e6))
     #PlotMagneticField(bmax, g, d, x_p)
-    RunVaryMdot(geom, simparams)
-    RunVaryBfield(geom, simparams)
+    RunVaryMdot(geom_custom, simparams)
+    RunVaryBfield(geom_custom, simparams)
     #RunBasicParams(config, simparams)
     #RunVaryMdotAndBfield(geom, simparams)
-    solution = het.run_simulation(config, simparams)
-    PlotPlasmaProperties(solution, "Krypton")
-    thrust, dischargeCurrent, anodeEff, isp, power = HETPerformance(solution)
+    solution_avg = het.run_simulation(config_avg, simparams)
+    solution_custom = het.run_simulation(config_custom, simparams)
+
+    PlotPlasmaProperties(solution_avg, "Krypton")
+    thrust_avg, dischargeCurrent_avg, anodeEff_avg, isp_avg, power_avg = HETPerformance(solution_avg)
+    println("=== Averaged Geometry Performance ===")
+    print_performance(thrust_avg[end], avg_mdot[end], anodeEff_avg[end], isp_avg[end], dischargeCurrent_avg[end], power_avg[end], V_anode)
+
+    PlotPlasmaProperties(solution_custom, "Krypton")
+    thrust, dischargeCurrent, anodeEff, isp, power = HETPerformance(solution_custom)
+    println("=== Custom Geometry Performance ===")
+    print_performance(thrust[end], mdot_custom, anodeEff[end], isp[end], dischargeCurrent[end], power[end], V_anode)
     
-    print_performance(thrust[end], avg_mdot[end], anodeEff[end], isp[end], dischargeCurrent[end], power[end], V_anode)
     return
 end
