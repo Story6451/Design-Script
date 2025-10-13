@@ -36,8 +36,8 @@ x_p = 0.03
 d = 0.015
 
 # CUSTOM THRUSTER
-d_custom = 0.022
-h_custom = 0.005
+d_custom = 0.02238
+h_custom = 0.00552
 mdot_custom = 0.9e-6
 
 # SIMULATION SETUP
